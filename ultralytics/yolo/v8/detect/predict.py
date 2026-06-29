@@ -5,6 +5,8 @@ import torch
 import argparse
 import time
 from pathlib import Path
+import os
+import sys
 
 import cv2
 import torch
@@ -16,6 +18,10 @@ from ultralytics.yolo.utils.checks import check_imgsz
 from ultralytics.yolo.utils.plotting import Annotator, colors, save_one_box
 
 import cv2
+DETECT_DIR = Path(__file__).resolve().parent
+if str(DETECT_DIR) not in sys.path:
+    sys.path.insert(0, str(DETECT_DIR))
+
 from deep_sort_pytorch.utils.parser import get_config
 from deep_sort_pytorch.deep_sort import DeepSort
 from collections import deque
@@ -24,17 +30,20 @@ palette = (2 ** 11 - 1, 2 ** 15 - 1, 2 ** 20 - 1)
 data_deque = {}
 
 deepsort = None
+DEEPSORT_ROOT = DETECT_DIR / "deep_sort_pytorch"
+DEEPSORT_CONFIG = DEEPSORT_ROOT / "configs" / "deep_sort.yaml"
 
 def init_tracker():
     global deepsort
     cfg_deep = get_config()
-    cfg_deep.merge_from_file("deep_sort_pytorch/configs/deep_sort.yaml")
+    cfg_deep.merge_from_file(str(DEEPSORT_CONFIG))
+    reid_ckpt = DEEPSORT_ROOT / "deep_sort" / "deep" / "checkpoint" / "ckpt.t7"
 
-    deepsort= DeepSort(cfg_deep.DEEPSORT.REID_CKPT,
+    deepsort= DeepSort(str(reid_ckpt),
                             max_dist=cfg_deep.DEEPSORT.MAX_DIST, min_confidence=cfg_deep.DEEPSORT.MIN_CONFIDENCE,
                             nms_max_overlap=cfg_deep.DEEPSORT.NMS_MAX_OVERLAP, max_iou_distance=cfg_deep.DEEPSORT.MAX_IOU_DISTANCE,
                             max_age=cfg_deep.DEEPSORT.MAX_AGE, n_init=cfg_deep.DEEPSORT.N_INIT, nn_budget=cfg_deep.DEEPSORT.NN_BUDGET,
-                            use_cuda=True)
+                            use_cuda=torch.cuda.is_available())
 ##########################################################################################
 def xyxy_to_xywh(*xyxy):
     """" Calculates the relative bounding box from absolute pixel values. """
@@ -232,11 +241,11 @@ class DetectionPredictor(BasePredictor):
         xywhs = torch.Tensor(xywh_bboxs)
         confss = torch.Tensor(confs)
           
-        outputs = deepsort.update(xywhs, confss, oids, im0)
+        outputs, _ = deepsort.update(xywhs, confss, oids, im0)
         if len(outputs) > 0:
             bbox_xyxy = outputs[:, :4]
-            identities = outputs[:, -2]
-            object_id = outputs[:, -1]
+            object_id = outputs[:, -2]
+            identities = outputs[:, -1]
             
             draw_boxes(im0, bbox_xyxy, self.model.names, object_id,identities)
 
