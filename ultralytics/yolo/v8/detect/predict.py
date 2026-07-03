@@ -1,48 +1,81 @@
 # Ultralytics YOLO 🚀, GPL-3.0 license
 
-import hydra
-import torch
 import argparse
-import time
-from pathlib import Path
+import csv
 import os
 import sys
+import time
+from pathlib import Path
 
 import cv2
+import hydra
 import torch
 import torch.backends.cudnn as cudnn
 from numpy import random
 from ultralytics.yolo.engine.predictor import BasePredictor
 from ultralytics.yolo.utils import DEFAULT_CONFIG, ROOT, ops
 from ultralytics.yolo.utils.checks import check_imgsz
-from ultralytics.yolo.utils.plotting import Annotator, colors, save_one_box
+from ultralytics.yolo.utils.plotting import Annotator
 
-import cv2
 DETECT_DIR = Path(__file__).resolve().parent
 if str(DETECT_DIR) not in sys.path:
     sys.path.insert(0, str(DETECT_DIR))
 
 from deep_sort_pytorch.utils.parser import get_config
-from deep_sort_pytorch.deep_sort import DeepSort
 from collections import deque
+
 import numpy as np
+
+from deep_sort_pytorch.deep_sort import DeepSort
 palette = (2 ** 11 - 1, 2 ** 15 - 1, 2 ** 20 - 1)
 data_deque = {}
+PERSON_CLASS_ID = 0
+DEBUG_COUNTS = os.getenv("TRACK_DEBUG_COUNTS", "").lower() in {"1", "true", "yes", "on"}
+COUNTS_CSV_PATH = os.getenv("TRACK_COUNTS_CSV", "")
 
 deepsort = None
 DEEPSORT_ROOT = DETECT_DIR / "deep_sort_pytorch"
 DEEPSORT_CONFIG = DEEPSORT_ROOT / "configs" / "deep_sort.yaml"
+
+
+def env_float(name, default):
+    value = os.getenv(name)
+    return default if value in (None, "") else float(value)
+
+
+def env_int(name, default):
+    value = os.getenv(name)
+    return default if value in (None, "") else int(value)
+
+
+def write_counts_row(frame, yolo_person_count, deepsort_input_count, track_count, frame_time_ms):
+    if not COUNTS_CSV_PATH:
+        return
+    path = Path(COUNTS_CSV_PATH)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    needs_header = not path.exists() or path.stat().st_size == 0
+    with path.open("a", newline="") as f:
+        writer = csv.writer(f)
+        if needs_header:
+            writer.writerow(["frame", "detections", "deepsort_in", "deepsort_tracks", "frame_time_ms", "fps"])
+        fps = 1000.0 / frame_time_ms if frame_time_ms > 0 else 0.0
+        writer.writerow([frame, yolo_person_count, deepsort_input_count, track_count, f"{frame_time_ms:.3f}", f"{fps:.3f}"])
+
 
 def init_tracker():
     global deepsort
     cfg_deep = get_config()
     cfg_deep.merge_from_file(str(DEEPSORT_CONFIG))
     reid_ckpt = DEEPSORT_ROOT / "deep_sort" / "deep" / "checkpoint" / "ckpt.t7"
+    min_confidence = env_float("DEEPSORT_MIN_CONFIDENCE", cfg_deep.DEEPSORT.MIN_CONFIDENCE)
+    nms_max_overlap = env_float("DEEPSORT_NMS_MAX_OVERLAP", cfg_deep.DEEPSORT.NMS_MAX_OVERLAP)
+    max_age = env_int("DEEPSORT_MAX_AGE", cfg_deep.DEEPSORT.MAX_AGE)
+    n_init = env_int("DEEPSORT_N_INIT", cfg_deep.DEEPSORT.N_INIT)
 
     deepsort= DeepSort(str(reid_ckpt),
-                            max_dist=cfg_deep.DEEPSORT.MAX_DIST, min_confidence=cfg_deep.DEEPSORT.MIN_CONFIDENCE,
-                            nms_max_overlap=cfg_deep.DEEPSORT.NMS_MAX_OVERLAP, max_iou_distance=cfg_deep.DEEPSORT.MAX_IOU_DISTANCE,
-                            max_age=cfg_deep.DEEPSORT.MAX_AGE, n_init=cfg_deep.DEEPSORT.N_INIT, nn_budget=cfg_deep.DEEPSORT.NN_BUDGET,
+                            max_dist=cfg_deep.DEEPSORT.MAX_DIST, min_confidence=min_confidence,
+                            nms_max_overlap=nms_max_overlap, max_iou_distance=cfg_deep.DEEPSORT.MAX_IOU_DISTANCE,
+                            max_age=max_age, n_init=n_init, nn_budget=cfg_deep.DEEPSORT.NN_BUDGET,
                             use_cuda=torch.cuda.is_available())
 ##########################################################################################
 def xyxy_to_xywh(*xyxy):
@@ -190,16 +223,19 @@ class DetectionPredictor(BasePredictor):
         preds = ops.non_max_suppression(preds,
                                         self.args.conf,
                                         self.args.iou,
+                                        classes=[PERSON_CLASS_ID],
                                         agnostic=self.args.agnostic_nms,
                                         max_det=self.args.max_det)
 
         for i, pred in enumerate(preds):
             shape = orig_img[i].shape if self.webcam else orig_img.shape
             pred[:, :4] = ops.scale_boxes(img.shape[2:], pred[:, :4], shape).round()
+            preds[i] = pred
 
         return preds
 
     def write_results(self, idx, preds, batch):
+        frame_start = time.time()
         p, im, im0 = batch
         all_outputs = []
         log_string = ""
@@ -221,7 +257,12 @@ class DetectionPredictor(BasePredictor):
 
         det = preds[idx]
         all_outputs.append(det)
+        yolo_person_count = len(det)
         if len(det) == 0:
+            frame_time_ms = (time.time() - frame_start) * 1000.0
+            write_counts_row(frame, yolo_person_count, 0, 0, frame_time_ms)
+            if DEBUG_COUNTS:
+                log_string += "debug: yolo_person=0, deepsort_in=0, tracks=0, "
             return log_string
         for c in det[:, 5].unique():
             n = (det[:, 5] == c).sum()  # detections per class
@@ -240,8 +281,16 @@ class DetectionPredictor(BasePredictor):
             oids.append(int(cls))
         xywhs = torch.Tensor(xywh_bboxs)
         confss = torch.Tensor(confs)
+        deepsort_input_count = len(xywh_bboxs)
           
         outputs, _ = deepsort.update(xywhs, confss, oids, im0)
+        if len(outputs) > 0:
+            outputs = outputs[outputs[:, -2] == PERSON_CLASS_ID]
+        track_count = len(outputs) if len(outputs) > 0 else 0
+        frame_time_ms = (time.time() - frame_start) * 1000.0
+        write_counts_row(frame, yolo_person_count, deepsort_input_count, track_count, frame_time_ms)
+        if DEBUG_COUNTS:
+            log_string += f"debug: yolo_person={yolo_person_count}, deepsort_in={deepsort_input_count}, tracks={track_count}, "
         if len(outputs) > 0:
             bbox_xyxy = outputs[:, :4]
             object_id = outputs[:, -2]
