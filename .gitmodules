@@ -1,0 +1,11 @@
+[submodule "third_party/ByteTrack"]
+	path = third_party/ByteTrack
+	url = https://github.com/FoundationVision/ByteTrack.git
+
+[submodule "third_party/boxmot_eval"]
+	path = third_party/boxmot_eval
+	url = https://github.com/mikel-brostrom/boxmot.git
+
+[submodule "ultralytics/yolo/v8/detect/deep_sort_pytorch"]
+	path = ultralytics/yolo/v8/detect/deep_sort_pytorch
+	url = https://github.com/ZQPei/deep_sort_pytorch.git
