@@ -34,8 +34,10 @@ DEBUG_COUNTS = os.getenv("TRACK_DEBUG_COUNTS", "").lower() in {"1", "true", "yes
 COUNTS_CSV_PATH = os.getenv("TRACK_COUNTS_CSV", "")
 
 deepsort = None
+PROJECT_ROOT = DETECT_DIR.parents[3]
 DEEPSORT_ROOT = DETECT_DIR / "deep_sort_pytorch"
-DEEPSORT_CONFIG = DEEPSORT_ROOT / "configs" / "deep_sort.yaml"
+PROJECT_DEEPSORT_CONFIG = PROJECT_ROOT / "configs" / "deep_sort.yaml"
+DEEPSORT_CONFIG = PROJECT_DEEPSORT_CONFIG if PROJECT_DEEPSORT_CONFIG.exists() else DEEPSORT_ROOT / "configs" / "deep_sort.yaml"
 
 
 def env_float(name, default):
