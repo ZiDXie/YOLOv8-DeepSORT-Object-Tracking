@@ -1,0 +1,7 @@
+path: /home/xie/Project/YOLOv8-DeepSORT-Object-Tracking/datasets/car_yolo_eval
+train: images/train
+val: images/test
+test: images/test
+names:
+  0: car
+nc: 1

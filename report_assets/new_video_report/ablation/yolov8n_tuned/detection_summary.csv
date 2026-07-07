@@ -1,0 +1,2 @@
+frames,avg_detections,min_detections,max_detections,zero_detection_ratio,avg_conf,conf_p10,conf_p50,conf_p90,avg_box_area_ratio,small_box_ratio,medium_box_ratio,large_box_ratio,avg_latency_ms,p50_latency_ms,p95_latency_ms,p99_latency_ms,avg_pipeline_fps,peak_gpu_memory_mb
+908,138.6420704845815,68.0,205.0,0.0,0.17667520087133698,0.05792009085416794,0.11695140600204468,0.39216849207878113,0.0010320291360806106,0.9999761691040377,2.383089596225186e-05,0.0,8963.83462472109,6530.263671875,10397.2470703125,12492.28125,0.29162000629178386,927.376953125

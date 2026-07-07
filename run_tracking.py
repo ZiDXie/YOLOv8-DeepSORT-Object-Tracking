@@ -36,6 +36,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--deepsort-n-init", type=int, default=1, help="DeepSORT frames required to confirm a track.")
     parser.add_argument("--debug-counts", action="store_true", help="Print YOLO/DeepSORT person counts per frame.")
     parser.add_argument("--counts-csv", default=None, help="Optional CSV path for per-frame DeepSORT counts.")
+    parser.add_argument("--project", default=None, help="Optional YOLO output project directory.")
+    parser.add_argument("--name", default=None, help="Optional YOLO output run name.")
     parser.add_argument("--augment", action="store_true", help="Use augmented YOLO inference for higher recall at lower speed.")
     parser.add_argument("--show", action="store_true", help="Display the video during inference.")
     return parser.parse_args()
@@ -92,6 +94,8 @@ def main() -> int:
     print(f"Using augment: {args.augment}")
     print(f"Debug counts: {args.debug_counts}")
     print(f"Counts CSV: {args.counts_csv}")
+    print(f"Project: {args.project}")
+    print(f"Name: {args.name}")
 
     cmd = [
         sys.executable,
@@ -106,6 +110,12 @@ def main() -> int:
         f"show={str(args.show)}",
         f"device={device}",
     ]
+    if args.project:
+        project = Path(args.project).expanduser().resolve()
+        project.mkdir(parents=True, exist_ok=True)
+        cmd.append(f"project={hydra_quote(str(project))}")
+    if args.name:
+        cmd.append(f"name={hydra_quote(args.name)}")
     return subprocess.run(cmd, cwd=ROOT, env=env).returncode
 
 
